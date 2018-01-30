@@ -199,6 +199,7 @@ class MwaCutoutsModel(BaseModel):
     out_rebkg_image = CharField(null=True, unique=True)
     out_corr_image = CharField(null=True, unique=True)
     out_vo_image = CharField(null=True, unique=True)
+    corrmos = CharField(null=True)
 
     class Meta:
         db_table = 'mwacutouts'
@@ -319,7 +320,16 @@ class Photometry(BaseModel):
     blob_mean = FloatField(null=True)
     blob_npts = FloatField(null=True)
     pick_flux = CharField(null=True)
-
     class Meta:
         db_table = 'Photometry'
 
+
+class PNcandidates(BaseModel):
+    ddecj2000 = FloatField(db_column='DDECJ2000', null=True)
+    draj2000 = FloatField(db_column='DRAJ2000', null=True)
+    majdiam = FloatField(db_column='MajDiam', null=True)
+    name = IntegerField(db_column='idPNMain', unique=True)
+    flag = CharField(null=True)
+
+    class Meta:
+        db_table = 'PNcandidates'

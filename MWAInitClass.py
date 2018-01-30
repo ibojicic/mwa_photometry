@@ -21,7 +21,7 @@ class MWAInit():
         return self.__table
 
     def set_table(self):
-        tablemap = {'pne': model.PneDetected, 'snrs': model.Galacticsnrs}
+        tablemap = {'pne': model.PNcandidates, 'snrs': model.Galacticsnrs}
         self.__table = tablemap[self.args.catalogue]
         return self
 
@@ -75,15 +75,6 @@ class MWAInit():
         parser.add_argument('--nowrite_db', '-d', action='store_true',
                             help="Do not write results to the database.")
 
-        ## special
-        parser.add_argument('--background_sub', '-e', action='store', required=False, type=str, default='default',
-                            help="Name of the file with coordinates of background objects to subtract. ")
-
-        ## special
-        parser.add_argument('--select_data', '-g', action='store', choices=['mosaics', 'vointerface'], required=False,
-                            type=str, default='mosaics',
-                            help="Data source, local mosaics files or online vo interface (gleam-vo.icrar.org).")
-
         self.__args = parser.parse_args()
 
 
@@ -95,7 +86,8 @@ class MWAInit():
         objects = self.table.select(self.table.name,
                                     self.table.draj2000,
                                     self.table.ddecj2000,
-                                    self.table.majdiam)
+                                    self.table.majdiam)\
+            .where(self.table.flag == 'y')
 
         if self.args.object != 'all':
             objects = objects.where(self.table.name == self.args.object)

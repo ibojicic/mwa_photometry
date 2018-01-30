@@ -82,11 +82,19 @@ class MWAObservation ():
     def set_in_file(self):
         if self.data.out_vo_image is not None:
             self.inimage = "{}vo/{}".format(self.object.infolder,self.data.out_vo_image)
-        elif self.data.out_corr_image is not None:
-            self.inimage = "{}corr/{}".format(self.object.infolder,self.data.out_corr_image)
-        else:
-            return False
+        elif self.data.corrmos == 'corr':
+            if self.data.out_corr_image is not None:
+                self.inimage = "{}corr/{}".format(self.object.infolder,self.data.out_corr_image)
+            else:
+                return False
+        elif self.data.corrmos == 'mos':
+            if self.data.out_mos_image is not None:
+                self.inimage = "{}mos/{}".format(self.object.infolder,self.data.out_mos_image)
+            else:
+                return False
+
         return True
+
     def set_out_files(self):
         if self.files is None:
             self.files = {}
@@ -125,8 +133,9 @@ class MWAObservation ():
 
     def parse_bckg_file(self):
         self.bckg = []
-        if self.args.background_sub != 'default':
-            with open(self.args.background_sub, 'rb') as f:
+        bckfile = "regions/{}.reg".format(self.object.name)
+        if os.path.exists(bckfile):
+            with open(bckfile, 'rb') as f:
                 reader = csv.reader(f,quoting=csv.QUOTE_NONNUMERIC)
                 self.bckg = list(reader)
 

@@ -3,9 +3,10 @@ import sys
 import shutil
 from math import isnan, floor
 
+from pprint import pprint
 import numpy as np
 from astropy import units as u
-from astropy.coordinates import Longitude, Latitude
+from astropy.coordinates import Longitude, Latitude, SkyCoord
 from casa import importfits, imfit, imhead, imstat, exportfits, immath
 
 import ibplotting.plotlibs as ibplot
@@ -99,16 +100,8 @@ class MWAPhotometry:
 
     ## run source fitting
     ## https://casa.nrao.edu/casadocs-devel/stable/global-task-list/task_imfit/about
-    def do_fit(self):
-        fitinput = {
-            'imagename':self.obs.files['imfile'],
-            'region':self.obs.pars['region_fit'],
-            'logfile':self.obs.files['logtable'],
-            'dooff':True,
-            'offset':self.bckgstats['mean'],
-            'fixoffset':self.args.fix_offset,
-            'summary':self.obs.files['summaryfile'],
-            'model':self.obs.files['modelfile']}
+    def do_fit(self, fitinput):
+        self.__fitresults = {}
         tmpfitresults = imfit(**fitinput)
         try:
             for i in tmpfitresults:
@@ -118,25 +111,45 @@ class MWAPhotometry:
 
     ## subtract background object
     def bckgsrc_fit(self, imfile, bckg_region, out_file):
-        imfit(
+        tmpfitresults = imfit(
             imagename=imfile,
             region=bckg_region,
             dooff=True,
             offset=self.bckgstats['mean'],
             fixoffset=self.args.fix_offset,
             model=out_file)
+        return tmpfitresults
 
     def subtract_bckgs(self):
         for bckg in self.obs.bckg:
             tmpimfile = "tmps/tmpimfile_{}.im".format(strings.id_generator())
             tmpmodel = "tmps/tmpmodelfile_{}.im".format(strings.id_generator())
             shutil.move(self.obs.files['imfile'], tmpimfile)
-            bckg_reg = 'circle[[{}deg,{}deg],{}arcsec]'.format(bckg[0], bckg[1], self.obs.pars['use_bmaj'])
-            self.bckgsrc_fit(tmpimfile, bckg_reg, tmpmodel)
-            immath([tmpimfile, tmpmodel],
-                   'evalexpr', self.obs.files['imfile'], expr='IM0-IM1')
+            # bckg_reg = 'circle[[{}deg,{}deg],{}arcsec]'.format(bckg[0], bckg[1], self.obs.pars['use_bmaj'])
+            bckg_reg = 'circle[[{}deg,{}deg],{}arcsec]'.format(bckg[0], bckg[1], 120.)
+            fit_input = {'imagename':tmpimfile,
+                         'region':bckg_reg,
+                         'dooff':True,
+                         'offset':self.bckgstats['mean'],
+                         'fixoffset':True,
+                         'model':tmpmodel
+                         }
+            # self.bckgsrc_fit(tmpimfile, bckg_reg, tmpmodel)
+            self.do_fit(fit_input)
+            if self.converged:
+                parsed = self.parse_fit()
+                c1 = SkyCoord(ra = bckg[0] * u.degree, dec = bckg[1] * u.degree, frame='fk5')
+                c2 = SkyCoord(ra = parsed['fit_posra'] * u.degree, dec = parsed['fit_posdec'] * u.degree, frame='fk5')
+                sep = c1.separation(c2)
+                if parsed['ispoint'] == 'y' and sep.arcsecond < 60. and \
+                        parsed['peak'] > 0 and (0.5 < parsed['maj_ax'] / self.obs.pars['use_bmaj'] < 2.):
+                    immath([tmpimfile, tmpmodel],
+                           'evalexpr', self.obs.files['imfile'], expr='IM0-IM1')
+                else:
+                    shutil.move(tmpimfile, self.obs.files['imfile'])
             shutil.rmtree(tmpmodel)
-            shutil.rmtree(tmpimfile)
+            if os.path.exists(tmpimfile):
+                shutil.rmtree(tmpimfile)
             ## do background statistics again
             self.set_bckgstats()
 
@@ -157,16 +170,25 @@ class MWAPhotometry:
         return self.fit_res['converged']
 
     def photometry(self):
-        ## get statistics in the annulus
+        ## get initial statistics in the annulus
         self.set_bckgstats()
         ## subtract backgrounds if any
         self.subtract_bckgs()
         ## make fits image from im
         exportfits(self.obs.files['imfile'], self.obs.files['imfits'])
         ## run source fitting
-        self.do_fit()
+        fitinput = {
+            'imagename':self.obs.files['imfile'],
+            'region':self.obs.pars['region_fit'],
+            'logfile':self.obs.files['logtable'],
+            'dooff':True,
+            'offset':self.bckgstats['mean'],
+            'fixoffset':self.args.fix_offset,
+            'summary':self.obs.files['summaryfile'],
+            'model':self.obs.files['modelfile']}
+        self.do_fit(fitinput)
         if self.converged:
-            self.parse_fit()
+            self.__fit_results = self.parse_fit()
         ## do aperture photometry
         if self.make_masked():
             self.__aprtrstats = self.aperture_phot(self.obs.files['maskedimage'], 0, "aprtr")
@@ -180,7 +202,9 @@ class MWAPhotometry:
     def results(self):
         return self.__fit_results
 
-    ## parse fir results from imfit
+
+
+    ## parse fit results from imfit
     def parse_fit(self):
 
         imfit_out_component = self.fit_res['results']['component0']
@@ -188,7 +212,7 @@ class MWAPhotometry:
         flux = imfit_out_component['flux']
         peak = imfit_out_component['peak']
         shape = imfit_out_component['shape']
-        self.__fit_results = {
+        parsed = {
             'flux_err': flux['error'][0],
             'flux_unit': flux['unit'],
             'flux': flux['value'][0],
@@ -222,8 +246,9 @@ class MWAPhotometry:
         checknas = ['flux_err', 'flux', 'peak_err', 'peak', 'maj_ax', 'maj_ax_err', 'min_ax', 'min_ax_err', 'pa',
                     'pa_err', 'off_lat', 'off_long']
         for checkna in checknas:
-            if isnan(self.__fit_results[checkna]):
-                del self.__fit_results[checkna]
+            if isnan(parsed[checkna]):
+                del parsed[checkna]
+        return parsed
 
     def parse_to_mysql(self):
         res = dicts.merge_dicts([
